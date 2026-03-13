@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Prediction Market Terminal v2</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/decimal.js/10.4.3/decimal.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+html{height:100%;overflow:hidden}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080b0f;--bg2:#0d1117;--bg3:#111820;--bg4:#161e28;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --yes:#26a65b;--yes-dim:rgba(38,166,91,0.14);--yes-glow:rgba(38,166,91,0.28);
+  --no:#e53935;--no-dim:rgba(229,57,53,0.14);--no-glow:rgba(229,57,53,0.28);
+  --gold:#f0b429;--warn:#f59e0b;
+  --muted:rgba(255,255,255,0.3);--text:rgba(255,255,255,0.85);
+  --font:'JetBrains Mono',monospace;
+}
+body{
+  background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;
+  height:100vh;display:flex;flex-direction:column;overflow:hidden;
+}
+
+/* ── TOP BAR ── */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:9px 16px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;gap:16px;flex-wrap:wrap}
+.market-name{font-size:13px;font-weight:700;color:#fff;letter-spacing:.05em}
+.market-meta{color:var(--muted);font-size:11px;margin-left:8px}
+.price-big{font-size:22px;font-weight:700;transition:color .3s}
+.price-change{font-size:11px}
+.top-stats{display:flex;gap:20px}
+.top-stat{text-align:right}
+.top-stat-label{color:var(--muted);font-size:9px;letter-spacing:.1em}
+.top-stat-value{font-size:13px;font-weight:600}
+.status-badge{padding:2px 9px;border-radius:20px;font-size:10px;letter-spacing:.05em}
+.status-open{background:rgba(38,166,91,.12);border:1px solid rgba(38,166,91,.3);color:#4ade80}
+.status-closed{background:rgba(229,57,53,.12);border:1px solid rgba(229,57,53,.3);color:#f87171}
+
+/* ════════════════════════════════════════════════
+   LAYOUT — body=100vh flex col, main=grid
+   ════════════════════════════════════════════════ */
+.main{
+  display:grid;
+  grid-template-columns:190px 1fr 300px;
+  grid-template-rows:1fr 185px;
+  gap:1px;
+  background:var(--border);
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+}
+/* order book — col1, обе строки */
+.panel{
+  grid-column:1;grid-row:1/3;
+  background:var(--bg2);
+  display:flex;flex-direction:column;
+  overflow:hidden;min-height:0;
+}
+/* center — col2, обе строки (чарт сверху, лента до низа) */
+.center-panel{
+  grid-column:2;grid-row:1/3;
+  display:flex;flex-direction:column;
+  gap:1px;background:var(--border);
+  min-height:0;overflow:hidden;
+}
+.chart-area{background:var(--bg2);flex:0 0 130px;flex-shrink:0;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:100%}
+.trades-panel{background:var(--bg2);flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.trade-row{display:grid;grid-template-columns:70px 90px 1fr 55px;padding:3px 12px;border-bottom:1px solid rgba(255,255,255,.025);font-size:11px}
+.trade-mine{background:rgba(240,180,41,.05)}
+/* right — col3, обе строки */
+.right-panel{
+  grid-column:3;grid-row:1/3;
+  display:flex;flex-direction:column;
+  gap:1px;background:var(--border);
+  min-height:0;overflow:hidden;
+}
+.order-form{background:var(--bg2);padding:13px;flex-shrink:0;overflow-y:auto;max-height:420px}
+.pos-panel{background:var(--bg2);flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+/* bottom — col1+2, row2 */
+.bottom-panel{
+  grid-column:1/3;grid-row:2;
+  background:var(--bg2);
+  display:flex;flex-direction:column;
+  overflow:hidden;min-height:0;
+}
+/* скролл-блок */
+.pb{overflow-y:auto;flex:1;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.08) transparent}
+/* заголовок */
+.ph{padding:7px 12px;border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+
+/* ── ORDER BOOK ── */
+.ob-hdr{display:grid;grid-template-columns:1fr 1fr 1fr;padding:4px 10px;color:var(--muted);font-size:9px;letter-spacing:.08em;border-bottom:1px solid var(--border);flex-shrink:0}
+.ob-row{display:grid;grid-template-columns:1fr 1fr 1fr;padding:3px 10px;cursor:pointer;position:relative;transition:background .1s}
+.ob-row:hover{background:rgba(255,255,255,.04)}
+.ob-fill{position:absolute;top:0;bottom:0;right:0;opacity:.12;pointer-events:none}
+.ob-ask .ob-fill{background:var(--no)}
+.ob-bid .ob-fill{background:var(--yes)}
+.ob-ap{color:var(--no);font-weight:600;font-size:11px}
+.ob-bp{color:var(--yes);font-weight:600;font-size:11px}
+.ob-v{color:var(--muted);text-align:right;font-size:11px}
+.ob-t{color:rgba(255,255,255,.35);text-align:right;font-size:11px}
+.ob-spread{padding:5px 10px;background:var(--bg3);display:flex;justify-content:space-between;font-size:11px;color:var(--gold);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-shrink:0}
+.ob-mine{background:rgba(240,180,41,.06) !important}
+
+/* Side toggle */
+.side-btn{padding:8px;text-align:center;cursor:pointer;font-family:var(--font);font-size:11px;font-weight:700;letter-spacing:.08em;border:none;background:transparent;transition:all .15s}
+.side-btn.yes{color:rgba(38,166,91,.45)}
+.side-btn.yes.active{background:var(--yes);color:#fff;box-shadow:0 0 14px var(--yes-glow)}
+.side-btn.no{color:rgba(229,57,53,.45)}
+.side-btn.no.active{background:var(--no);color:#fff;box-shadow:0 0 14px var(--no-glow)}
+
+/* Type tabs */
+.type-tabs{display:flex;gap:3px;margin-bottom:12px}
+.type-tab{flex:1;padding:5px 4px;font-family:var(--font);font-size:10px;font-weight:600;letter-spacing:.06em;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;border-radius:4px;transition:all .15s;text-align:center}
+.type-tab.active{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.18);color:#fff}
+
+/* Fields */
+.field{margin-bottom:10px}
+.flabel{font-size:9px;color:var(--muted);letter-spacing:.1em;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
+.flabel .hint{color:var(--gold);cursor:pointer;font-size:9px}
+.flabel .hint:hover{color:#fff}
+.iw{position:relative;display:flex;align-items:center}
+.fi{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:7px 32px 7px 9px;color:#fff;font-family:var(--font);font-size:12px;outline:none;transition:border-color .15s;-moz-appearance:textfield}
+.fi::-webkit-inner-spin-button{-webkit-appearance:none}
+.fi:focus{border-color:rgba(255,255,255,.28)}
+.fi.err{border-color:var(--no)}
+.fi.warn{border-color:var(--warn)}
+.funit{position:absolute;right:8px;font-size:9px;color:var(--muted);pointer-events:none}
+
+/* Gap warning */
+
+
+/* Pct buttons */
+.pct-row{display:flex;gap:3px;margin-bottom:10px}
+.pct-btn{flex:1;padding:5px 0;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--muted);font-family:var(--font);font-size:10px;cursor:pointer;transition:all .12s}
+.pct-btn:hover{border-color:rgba(255,255,255,.2);color:#fff}
+.pct-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(240,180,41,.07)}
+
+/* Self-buy */
+.self-buy-row{display:flex;align-items:center;justify-content:space-between;padding:7px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;margin-bottom:10px;cursor:pointer;transition:border-color .15s}
+.self-buy-row:hover{border-color:rgba(240,180,41,.4)}
+.self-buy-row.on{border-color:var(--gold);background:rgba(240,180,41,.06)}
+.sbl{font-size:10px;color:var(--muted)}
+.sbl span{color:var(--gold)}
+.toggle{width:30px;height:16px;background:var(--bg);border:1px solid var(--border2);border-radius:8px;position:relative;transition:background .2s;flex-shrink:0}
+.toggle.on{background:var(--gold);border-color:var(--gold)}
+.tknob{position:absolute;top:2px;left:2px;width:10px;height:10px;background:#fff;border-radius:50%;transition:left .2s}
+.toggle.on .tknob{left:16px}
+
+/* Cost summary */
+.cs{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:9px;margin-bottom:11px;display:none}
+.cs.show{display:block}
+.cs-row{display:flex;justify-content:space-between;padding:2px 0;font-size:11px}
+.cs-lbl{color:var(--muted)}
+.cs-val{color:#fff}
+.cs-total{border-top:1px solid var(--border);margin-top:4px;padding-top:5px;font-weight:700}
+.cs-total .cs-val{color:var(--gold);font-size:13px}
+
+/* Submit btn */
+.submit-btn{width:100%;padding:11px;border:none;border-radius:5px;font-family:var(--font);font-size:12px;font-weight:700;letter-spacing:.1em;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.submit-btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important;filter:none!important}
+.submit-btn:not(:disabled):hover{filter:brightness(1.1);transform:translateY(-1px)}
+.submit-btn.yes-btn{background:var(--yes);color:#fff;box-shadow:0 4px 16px var(--yes-glow)}
+.submit-btn.no-btn{background:var(--no);color:#fff;box-shadow:0 4px 16px var(--no-glow)}
+.spinner{width:12px;height:12px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.err-msg{font-size:10px;color:var(--no);margin-top:7px;display:none;line-height:1.5}
+.err-msg.show{display:block}
+
+/* Positions */
+.pos-row{padding:9px 12px;border-bottom:1px solid var(--border);animation:fadeIn .3s}
+.pos-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.pos-details{display:flex;gap:14px;flex-wrap:wrap}
+.pos-dl{font-size:9px;color:var(--muted);letter-spacing:.08em}
+.pos-dv{font-size:11px;color:var(--text)}
+.close-btn{padding:3px 9px;background:transparent;border:1px solid rgba(229,57,53,.4);border-radius:3px;color:var(--no);font-family:var(--font);font-size:10px;cursor:pointer;transition:all .12s}
+.close-btn:hover{background:var(--no-dim)}
+
+/* Bottom tabs */
+.tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{padding:7px 14px;font-family:var(--font);font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;background:transparent;border-top:none;border-left:none;border-right:none}
+.tab.active{color:#fff;border-bottom-color:var(--gold)}
+.tc{display:none;overflow-y:auto;flex:1;min-height:0}
+.tc.active{display:block}
+.htable{width:100%;border-collapse:collapse}
+.htable th{padding:5px 11px;text-align:left;font-size:9px;color:var(--muted);font-weight:500;letter-spacing:.08em;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);white-space:nowrap}
+.htable td{padding:5px 11px;font-size:11px;border-bottom:1px solid rgba(255,255,255,.025);white-space:nowrap}
+.htable tr:hover td{background:rgba(255,255,255,.02)}
+.s-filled{color:var(--yes)}.s-open{color:var(--gold)}.s-canceled{color:var(--muted)}.s-partial{color:#60a5fa}.s-expired{color:#a78bfa}
+.cxl-btn{padding:2px 7px;background:transparent;border:1px solid rgba(229,57,53,.35);border-radius:3px;color:var(--no);font-family:var(--font);font-size:9px;cursor:pointer}
+.cxl-btn:hover{background:var(--no-dim)}
+
+/* Balance bar */
+.balbar{padding:7px 14px;background:var(--bg3);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;flex-wrap:wrap;gap:8px}
+.bi{display:flex;flex-direction:column}
+.bi-l{font-size:9px;color:var(--muted);letter-spacing:.1em}
+.bi-v{font-size:12px;font-weight:700}
+
+/* Toasts */
+#tc{position:fixed;bottom:18px;right:18px;z-index:9999;display:flex;flex-direction:column;gap:7px;pointer-events:none}
+.toast{padding:9px 14px;border-radius:5px;font-size:11px;max-width:280px;pointer-events:auto;animation:slideIn .25s ease}
+@keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+.toast.success{background:#0a1f12;border:1px solid rgba(38,166,91,.3);color:#4ade80}
+.toast.error{background:#1a0808;border:1px solid rgba(229,57,53,.3);color:#f87171}
+.toast.info{background:#0a1220;border:1px solid rgba(96,165,250,.3);color:#93c5fd}
+.toast.warn{background:#1a1200;border:1px solid rgba(245,158,11,.3);color:#fbbf24}
+
+/* Gap warning badge in order book */
+
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+.empty-state{padding:18px;text-align:center;color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span class="market-name">ETH-2026-Q1</span>
+    <span class="market-meta">Prediction Market</span>
+    <span class="status-badge status-open" id="mkt-badge">● OPEN</span>
+  </div>
+  <div style="display:flex;align-items:baseline;gap:10px">
+    <span class="price-big" id="top-price" style="color:var(--yes)">$0.6500</span>
+    <span class="price-change" id="top-chg" style="color:var(--yes)">+0.00%</span>
+  </div>
+  <div class="top-stats">
+    <div class="top-stat"><div class="top-stat-label">ОБЪЁМ 24H</div><div class="top-stat-value">$48,230</div></div>
+    <div class="top-stat"><div class="top-stat-label">ОТКРЫТЫЕ</div><div class="top-stat-value" id="open-cnt">0</div></div>
+    <div class="top-stat"><div class="top-stat-label">UNREALIZED P&L</div><div class="top-stat-value" id="top-upnl">$0.00</div></div>
+    <div class="top-stat"><div class="top-stat-label">REALIZED P&L</div><div class="top-stat-value" id="top-rpnl">$0.00</div></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- ORDER BOOK -->
+  <div class="panel">
+    <div class="ph">Книга заявок<span style="color:var(--muted);font-weight:400;font-size:9px">FIFO · live</span></div>
+    <div class="ob-hdr"><span>Цена</span><span style="text-align:right">Объём</span><span style="text-align:right">Итого</span></div>
+    <div id="ob-asks" style="flex-shrink:0"></div>
+    <div class="ob-spread"><span>Спред</span><span id="ob-spread-val">—</span></div>
+    <div id="ob-bids" class="pb"></div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center-panel">
+    <div class="chart-area"><canvas id="chart"></canvas></div>
+    <div class="trades-panel">
+      <div class="ph">Лента сделок</div>
+      <div class="pb" id="trades-list">
+        <div class="trade-row" style="color:var(--muted);font-size:9px;padding:4px 12px">
+          <span>Время</span><span>Цена</span><span>Объём</span><span style="text-align:right">Тип</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: FORM + POSITIONS -->
+  <div class="right-panel">
+    <div class="order-form">
+
+      <!-- SIDE -->
+      <div class="side-toggle">
+        <button class="side-btn yes active" id="sb-yes" onclick="setSide('YES')">КУПИТЬ YES</button>
+        <button class="side-btn no"         id="sb-no"  onclick="setSide('NO')">КУПИТЬ NO</button>
+      </div>
+
+      <!-- TYPE TABS -->
+      <div class="type-tabs">
+        <button class="type-tab active" id="tt-market" onclick="setType('market')">MARKET</button>
+        <button class="type-tab"        id="tt-limit"  onclick="setType('limit')">LIMIT</button>
+      </div>
+
+      <!-- LIMIT PRICE -->
+      <div class="field" id="field-limit" style="display:none">
+        <div class="flabel">
+          ЛИМИТНАЯ ЦЕНА
+          <span class="hint" onclick="setMktPrice()">↳ рыночная</span>
+        </div>
+        <div class="iw">
+          <input class="fi" id="limit-price" type="number" step="0.01" min="0.01" max="0.99" placeholder="0.65" oninput="recalc()"/>
+          <span class="funit">USDC</span>
+        </div>
+      </div>
+
+      <!-- QUANTITY -->
+      <div class="field">
+        <div class="flabel">КОЛИЧЕСТВО (мин. 10)<span class="hint" onclick="setPct(100)">макс</span></div>
+        <div class="iw">
+          <input class="fi" id="qty" type="number" min="10" step="1" placeholder="0" oninput="recalc()"/>
+          <span class="funit">шт</span>
+        </div>
+      </div>
+
+      <!-- PCT BUTTONS -->
+      <div class="pct-row">
+        <button class="pct-btn" onclick="setPct(25)">25%</button>
+        <button class="pct-btn" onclick="setPct(50)">50%</button>
+        <button class="pct-btn" onclick="setPct(75)">75%</button>
+        <button class="pct-btn" onclick="setPct(100)">100%</button>
+      </div>
+
+      <!-- SELF-BUY -->
+      <div class="self-buy-row" id="self-buy-row" onclick="toggleSelfBuy()">
+        <div class="sbl">Самовыкуп <span>(закрыть свои позиции)</span></div>
+        <div class="toggle" id="sb-toggle"><div class="tknob"></div></div>
+      </div>
+
+      <!-- TTL -->
+      <div class="field" id="field-ttl" style="display:none">
+        <div class="flabel">СРОК ДЕЙСТВИЯ</div>
+        <div class="iw">
+          <select class="fi" id="ttl-select" style="padding-right:9px;cursor:pointer">
+            <option value="GTC">GTC — до отмены</option>
+            <option value="1h">1 час</option>
+            <option value="4h">4 часа</option>
+            <option value="24h">24 часа</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- COST SUMMARY -->
+      <div class="cs" id="cs">
+        <div class="cs-row"><span class="cs-lbl">Кол-во</span><span class="cs-val" id="cs-qty">—</span></div>
+        <div class="cs-row"><span class="cs-lbl">Цена</span><span class="cs-val" id="cs-price">—</span></div>
+        <div class="cs-row"><span class="cs-lbl">Комиссия (2%)</span><span class="cs-val" id="cs-fee">—</span></div>
+        <div class="cs-row" id="cs-sb-row" style="display:none">
+          <span class="cs-lbl" style="color:var(--gold)">↳ Самовыкуп</span>
+          <span class="cs-val" id="cs-sb" style="color:var(--gold)">—</span>
+        </div>
+        <div class="cs-row cs-total"><span class="cs-lbl" style="color:#fff;font-weight:700">ИТОГО</span><span class="cs-val" id="cs-total">—</span></div>
+      </div>
+
+      <!-- ERROR -->
+      <div class="err-msg" id="err-msg"></div>
+
+      <!-- SUBMIT -->
+      <button class="submit-btn yes-btn" id="submit-btn" onclick="submitOrder()" disabled>
+        <span class="spinner" id="spinner"></span>
+        <span id="submit-lbl">РАЗМЕСТИТЬ ОРДЕР</span>
+      </button>
+    </div>
+
+    <!-- POSITIONS -->
+    <div class="pos-panel">
+      <div class="ph">Позиции<span id="pos-upnl" style="color:var(--yes)"></span></div>
+      <div class="pb" id="pos-list"><div class="empty-state">Нет открытых позиций</div></div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: ORDER HISTORY -->
+  <div class="bottom-panel">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('open')">Открытые <span id="open-badge" style="color:var(--gold)"></span></button>
+      <button class="tab" onclick="switchTab('filled')">Исполненные</button>
+      <button class="tab" onclick="switchTab('canceled')">Отменённые / Истёкшие</button>
+    </div>
+    <div class="tc active" id="tab-open">
+      <table class="htable"><thead><tr>
+        <th>ID</th><th>Время</th><th>Тип</th><th>Сторона</th><th>Цена</th><th>Стоп</th><th>Кол-во</th><th>Исп.</th><th>TTL</th><th>Статус</th><th></th>
+      </tr></thead><tbody id="tb-open"></tbody></table>
+      <div class="empty-state" id="e-open">Нет открытых ордеров</div>
+    </div>
+    <div class="tc" id="tab-filled">
+      <table class="htable"><thead><tr>
+        <th>ID</th><th>Время исп.</th><th>Тип</th><th>Сторона</th><th>Цена исп.</th><th>Кол-во/Всего</th><th>Комиссия</th><th>Итого</th><th>P&L</th>
+      </tr></thead><tbody id="tb-filled"></tbody></table>
+      <div class="empty-state" id="e-filled">Нет исполненных ордеров</div>
+    </div>
+    <div class="tc" id="tab-canceled">
+      <table class="htable"><thead><tr>
+        <th>ID</th><th>Время</th><th>Тип</th><th>Сторона</span></th><th>Цена</th><th>Кол-во</th><th>Причина</th>
+      </tr></thead><tbody id="tb-canceled"></tbody></table>
+      <div class="empty-state" id="e-canceled">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- BALANCE BAR -->
+<div class="balbar">
+  <div class="bi"><div class="bi-l">USDC ДОСТУПНО</div><div class="bi-v" id="bal-avail" style="color:var(--yes)">$500.00</div></div>
+  <div class="bi"><div class="bi-l">ЗАМОРОЖЕНО</div><div class="bi-v" id="bal-frozen" style="color:var(--muted)">$0.00</div></div>
+  <div class="bi"><div class="bi-l">YES ДОЛИ</div><div class="bi-v" id="bal-yes" style="color:#60a5fa">0</div></div>
+  <div class="bi"><div class="bi-l">NO ДОЛИ</div><div class="bi-v" id="bal-no" style="color:#f472b6">0</div></div>
+  <div class="bi"><div class="bi-l">UNREALIZED P&L</div><div class="bi-v" id="bal-upnl">$0.00</div></div>
+  <div class="bi"><div class="bi-l">REALIZED P&L</div><div class="bi-v" id="bal-rpnl">$0.00</div></div>
+</div>
+
+<div id="tc"></div>
+
+<!-- ════════════════════════════════════════════════════════
+     ORDER ENGINE (встроен)
+═════════════════════════════════════════════════════════ -->
+<script>
+// ── Константы ───────────────────────────────────────────
+const FEE_RATE  = new Decimal('0.02');
+const MIN_PRICE = new Decimal('0.01');
+const MAX_PRICE = new Decimal('0.99');
+const MIN_LOT   = 10;
+const USER_ID   = 'trader';
+
+// ── BalanceLedger ────────────────────────────────────────
+class BalanceLedger {
+  constructor() { this._a = new Map(); }
+  _get(id) {
+    if (!this._a.has(id)) this._a.set(id, {
+      available: new Decimal(500), frozen: new Decimal(0),
+      shares: {YES:0,NO:0}, frozenShares:{YES:0,NO:0}
+    });
+    return this._a.get(id);
+  }
+  getBalance(id) {
+    const a = this._get(id);
+    return { available:a.available, frozen:a.frozen,
+      shares:{...a.shares}, frozenShares:{...a.frozenShares} };
+  }
+  freezeUsdc(id, amount) {
+    const a = this._get(id), amt = new Decimal(amount);
+    if (a.available.lt(amt)) throw new EngineError('INSUFFICIENT_BALANCE',
+      `Нужно $${amt.toFixed(4)}, доступно $${a.available.toFixed(4)}`);
+    a.available = a.available.sub(amt); a.frozen = a.frozen.add(amt);
+    return amt;
+  }
+  freezeShares(id, outcome, qty) {
+    const a = this._get(id);
+    if ((a.shares[outcome]||0) < qty) throw new EngineError('INSUFFICIENT_ASSETS',
+      `Нужно ${qty} долей ${outcome}, доступно ${a.shares[outcome]||0}`);
+    a.shares[outcome] -= qty; a.frozenShares[outcome] = (a.frozenShares[outcome]||0)+qty;
+  }
+  unfreezeUsdc(id, amount) {
+    const a = this._get(id), amt = new Decimal(amount);
+    a.frozen    = Decimal.max(0, a.frozen.sub(amt));
+    a.available = a.available.add(amt);
+  }
+  unfreezeShares(id, outcome, qty) {
+    const a = this._get(id);
+    a.frozenShares[outcome] = Math.max(0,(a.frozenShares[outcome]||0)-qty);
+    a.shares[outcome] = (a.shares[outcome]||0)+qty;
+  }
+  settleBuy(id, outcome, qty, execPrice) {
+    const a = this._get(id);
+    const cost  = new Decimal(qty).mul(execPrice);
+    const fee   = cost.mul(FEE_RATE);
+    const total = cost.add(fee);
+    if (a.frozen.lt(total)) {
+      const deficit = total.sub(a.frozen);
+      if (a.available.lt(deficit)) throw new EngineError('BALANCE_RACE','Баланс изменился в процессе исполнения');
+      a.frozen = new Decimal(0); a.available = a.available.sub(deficit);
+    } else { a.frozen = a.frozen.sub(total); }
+    a.shares[outcome] = (a.shares[outcome]||0)+qty;
+    return { cost, fee, total };
+  }
+  settleSell(id, outcome, qty, execPrice) {
+    const a = this._get(id);
+    const rev = new Decimal(qty).mul(execPrice);
+    const fee = rev.mul(FEE_RATE);
+    const net = rev.sub(fee);
+    a.frozenShares[outcome] = Math.max(0,(a.frozenShares[outcome]||0)-qty);
+    a.available = a.available.add(net);
+    return { revenue:rev, fee, net };
+  }
+  deposit(id, amount) { this._get(id).available = this._get(id).available.add(new Decimal(amount)); }
+  depositShares(id, outcome, qty) { const a=this._get(id); a.shares[outcome]=(a.shares[outcome]||0)+qty; }
+}
+
+// ── OrderBook ────────────────────────────────────────────
+class OrderBook {
+  constructor() { this._asks=new Map(); this._bids=new Map(); }
+  _map(side){ return side==='SELL'?this._asks:this._bids; }
+  add(o){ const k=o.price.toFixed(4),b=this._map(o.side); if(!b.has(k))b.set(k,[]); b.get(k).push(o); }
+  remove(id,side){ const b=this._map(side); for(const[k,os]of b){const i=os.findIndex(o=>o.id===id);if(i!==-1){os.splice(i,1);if(!os.length)b.delete(k);return true;}}return false; }
+  bestAsk(){ if(!this._asks.size)return null; return new Decimal([...this._asks.keys()].map(Number).sort((a,b)=>a-b)[0]); }
+  bestBid(){ if(!this._bids.size)return null; return new Decimal([...this._bids.keys()].map(Number).sort((a,b)=>b-a)[0]); }
+  getAsks(){ return [...this._asks.keys()].map(Number).sort((a,b)=>a-b).flatMap(p=>this._asks.get(p.toFixed(4))||[]); }
+  getBids(){ return [...this._bids.keys()].map(Number).sort((a,b)=>b-a).flatMap(p=>this._bids.get(p.toFixed(4))||[]); }
+  snapshot(){
+    const asks=[],bids=[];let aT=0,bT=0;
+    [...this._asks.keys()].map(Number).sort((a,b)=>a-b).slice(0,8).forEach(p=>{
+      const q=( this._asks.get(p.toFixed(4))||[]).reduce((s,o)=>s+(o.quantity-o.filled),0);
+      aT+=q; asks.push({price:p,qty:q,total:aT});
+    });
+    [...this._bids.keys()].map(Number).sort((a,b)=>b-a).slice(0,8).forEach(p=>{
+      const q=(this._bids.get(p.toFixed(4))||[]).reduce((s,o)=>s+(o.quantity-o.filled),0);
+      bT+=q; bids.push({price:p,qty:q,total:bT});
+    });
+    return{asks,bids};
+  }
+}
+
+// ── StopWatcher ──────────────────────────────────────────
+class StopWatcher {
+  constructor(engine){ this.engine=engine; this._stops=new Map(); }
+  register(o){ this._stops.set(o.id,o); }
+  unregister(id){ this._stops.delete(id); }
+  onTick(price, outcome){
+    for(const[id,o]of this._stops){
+      if(o.isActivated) continue;
+      if(!['PENDING','PARTIALLY_FILLED'].includes(o.status)){this._stops.delete(id);continue;}
+      const triggered=(o.side==='BUY'&&price.gte(o.stopPrice))||(o.side==='SELL'&&price.lte(o.stopPrice));
+      if(triggered){
+        o.isActivated=true; // атомарно, защита от двойной активации
+        this._stops.delete(id);
+        const gap=(o.side==='BUY'&&price.gt(o.price))||(o.side==='SELL'&&price.lt(o.price));
+        if(gap){
+          o.gapWarning=true;
+          this.engine._emit('GAP_WARNING',{orderId:id,stopPrice:o.stopPrice,limitPrice:o.price,currentPrice:price});
+        }
+        this._activate(o,outcome);
+      }
+    }
+  }
+  _activate(o,outcome){
+    try{
+      if(o.side==='BUY'){
+        const tf=o.price.mul(o.quantity-o.filled).mul(new Decimal(1).add(FEE_RATE));
+        this.engine.ledger.freezeUsdc(o.userId,tf); o.frozenAmount=tf;
+      } else { this.engine.ledger.freezeShares(o.userId,outcome,o.quantity-o.filled); }
+      o.type='limit'; this.engine.orderBook.add(o);
+      this.engine._emit('STOP_ACTIVATED',{order:o,outcome});
+    } catch(e){
+      o.status='CANCELLED'; o.cancelReason='ACTIVATION_FAILED: '+e.message;
+      this.engine._emit('ORDER_UPDATED',o);
+    }
+  }
+}
+
+// ── EngineError ──────────────────────────────────────────
+class EngineError extends Error{
+  constructor(code,msg){super(msg);this.code=code;}
+}
+
+// ── OrderEngine ──────────────────────────────────────────
+class OrderEngine extends EventTarget{
+  constructor(ledger){
+    super(); this.ledger=ledger;
+    this.orderBook=new OrderBook();
+    this.stopWatcher=new StopWatcher(this);
+    this.orders=new Map(); this._lastPrice=new Decimal('0.65'); this._idc=0;
+  }
+  _id(){ return 'ORD-'+(++this._idc).toString().padStart(5,'0'); }
+  _vp(p){ const d=new Decimal(p); if(d.lt(MIN_PRICE)||d.gt(MAX_PRICE))throw new EngineError('INVALID_PRICE',`Цена [${MIN_PRICE}–${MAX_PRICE}]`); return d; }
+  _vq(q){ const n=parseInt(q,10); if(!Number.isInteger(n)||n<MIN_LOT)throw new EngineError('INVALID_QUANTITY',`Мин. лот: ${MIN_LOT} шт`); return n; }
+  _mkOrder(userId,side,type,outcome,price,qty,ex={}){
+    return{id:this._id(),userId,side,type,outcome,price:new Decimal(price),quantity:qty,filled:0,
+      status:'PENDING',createdAt:Date.now(),isActivated:false,frozenAmount:null,
+      ttl:ex.ttl||'GTC',stopPrice:ex.stopPrice||null,cancelReason:null,gapWarning:false};
+  }
+
+  placeMarket(userId,side,outcome,qty){
+    const q=this._vq(qty), o=this._mkOrder(userId,side,'market',outcome,this._lastPrice,q);
+    if(side==='BUY'){ const ef=new Decimal(q).mul(this._lastPrice).mul(new Decimal(1).add(FEE_RATE)); this.ledger.freezeUsdc(userId,ef); o.frozenAmount=ef; }
+    else { this.ledger.freezeShares(userId,outcome,q); }
+    this._execMarket(o,outcome); return o;
+  }
+
+  placeLimit(userId,side,outcome,price,qty,ttl='GTC'){
+    const p=this._vp(price), q=this._vq(qty);
+    const o=this._mkOrder(userId,side,'limit',outcome,p,q,{ttl});
+
+    // Заморозка средств
+    if(side==='BUY'){ const tf=p.mul(q).mul(new Decimal(1).add(FEE_RATE)); this.ledger.freezeUsdc(userId,tf); o.frozenAmount=tf; }
+    else { this.ledger.freezeShares(userId,outcome,q); }
+
+    // Sim-ордера не храним в orders Map — иначе утечка памяти (тысячи записей)
+    if(userId !== 'sim'){
+      // БАГ 1 FIX: сохраняем в orders ДО emit, чтобы renderOrders видел ордер сразу
+      this.orders.set(o.id,o);
+      console.log(`[ENGINE] placeLimit: ${o.id} | ${side} ${outcome} | ${qty}шт @ $${p} | статус: ${o.status}`);
+
+      // БАГ 2 FIX: немедленный матчинг — проверяем встречные ордера включая self-match
+      const matched = this._immediateMatch(o, outcome);
+      console.log(`[ENGINE] immediateMatch для ${o.id}: исполнено ${matched} шт, статус: ${o.status}`);
+    }
+
+    // Если не полностью исполнен — кладём остаток в стакан
+    if(['PENDING','PARTIALLY_FILLED'].includes(o.status)){
+      this.orderBook.add(o);
+      if(userId !== 'sim') console.log(`[ENGINE] ${o.id} добавлен в orderBook, ждёт цены $${p}`);
+    }
+
+    if(userId !== 'sim'){
+      this._emit('ORDER_PLACED', o);
+      this._emit('ORDER_UPDATED', o);
+    }
+    return o;
+  }
+
+  // БАГ 2 FIX: немедленный матчинг при размещении (включая self-match)
+  _immediateMatch(o, outcome){
+    const allCounters = o.side==='BUY' ? this.orderBook.getAsks() : this.orderBook.getBids();
+    // Только встречные ордера с тем же outcome
+    const counterOrders = allCounters.filter(co => co.outcome === outcome);
+    let totalFilled = 0;
+    let rem = o.quantity - o.filled;
+
+    for(const co of counterOrders){
+      if(rem <= 0) break;
+      const priceOk = o.side==='BUY' ? co.price.lte(o.price) : co.price.gte(o.price);
+      if(!priceOk) break;
+
+      if(co.userId === o.userId && !selfBuy) continue;
+
+      const avail = co.quantity - co.filled;
+      const eq = Math.min(rem, avail);
+      this._fill(o, co, eq, co.price, outcome);
+      totalFilled += eq;
+      rem -= eq;
+    }
+    return totalFilled;
+  }
+
+  placeStopLimit(userId,side,outcome,stopPrice,limitPrice,qty,ttl='GTC'){
+    const sp=this._vp(stopPrice), lp=this._vp(limitPrice), q=this._vq(qty);
+    const o=this._mkOrder(userId,side,'stop',outcome,lp,q,{stopPrice:sp,ttl});
+    if(side==='BUY'){ const tf=lp.mul(q).mul(new Decimal(1).add(FEE_RATE)); this.ledger.freezeUsdc(userId,tf); o.frozenAmount=tf; }
+    else { this.ledger.freezeShares(userId,outcome,q); }
+    this.orders.set(o.id,o); this.stopWatcher.register(o);
+    this._emit('ORDER_PLACED',o); return o;
+  }
+
+  _execMarket(o,outcome){
+    const counterOrders=o.side==='BUY'?this.orderBook.getAsks():this.orderBook.getBids();
+    // Фильтруем: только counter-orders с тем же outcome
+    const matching = counterOrders.filter(co => co.outcome === outcome);
+    let rem=o.quantity-o.filled;
+    for(const co of matching){
+      if(rem<=0)break;
+      const avail=co.quantity-co.filled;
+      const eq=Math.min(rem,avail);
+      this._fill(o,co,eq,co.price,outcome);
+      rem-=eq;
+    }
+    // Если ордер рыночный и не весь объём исполнен через стакан — исполняем остаток по последней цене
+    if(rem>0&&o.status!=='FILLED'&&o.type==='market'){
+      const execP = this._lastPrice;
+      const syntheticCounter = {
+        id:'_synthetic_'+Date.now(), userId:'sim', side:o.side==='BUY'?'SELL':'BUY',
+        outcome, price:execP, quantity:rem, filled:0, status:'PENDING', isActivated:false,
+        ttl:'GTC', stopPrice:null, cancelReason:null, gapWarning:false,
+        createdAt:Date.now(), executions:[], frozenAmount:null
+      };
+      this._fill(o, syntheticCounter, rem, execP, outcome);
+    }
+    if(o.side==='BUY'&&o.frozenAmount) this._refund(o);
+    // Всегда сохраняем user-ордер и эмитим UPDATE
+    if(o.userId !== 'sim') { this.orders.set(o.id,o); this._emit('ORDER_UPDATED',o); }
+  }
+
+  _fill(o,co,qty,execPrice,outcome){
+    co.filled+=qty; co.status=co.filled>=co.quantity?'FILLED':'PARTIALLY_FILLED';
+    if(co.status==='FILLED') this.orderBook.remove(co.id,co.side);
+    o.filled+=qty; o.status=o.filled>=o.quantity?'FILLED':'PARTIALLY_FILLED';
+
+    // Settle и записать результат в объект ордера
+    const _record = (ord, settle) => {
+      if (!ord.executions) ord.executions = [];
+      ord.executions.push({ qty, execPrice, fee: settle.fee, total: ord.side==='BUY'?settle.total:settle.net, ts: Date.now() });
+      // Агрегированные поля для быстрого рендера
+      ord.lastExecPrice = execPrice;
+      ord.totalFee      = (ord.totalFee  || new Decimal(0)).add(settle.fee);
+      ord.totalSpent    = (ord.totalSpent|| new Decimal(0)).add(ord.side==='BUY'?settle.total:settle.net);
+      ord.filledAt      = Date.now();
+    };
+
+    const rs = o.side==='BUY'  ? this.ledger.settleBuy(o.userId,outcome,qty,execPrice)
+                                : this.ledger.settleSell(o.userId,outcome,qty,execPrice);
+    _record(o, rs);
+
+    const rc = co.side==='BUY' ? this.ledger.settleBuy(co.userId,outcome,qty,execPrice)
+                                : this.ledger.settleSell(co.userId,outcome,qty,execPrice);
+    _record(co, rc);
+
+    this._emit('TRADE',{orderId:o.id,qty,execPrice,outcome});
+    this._emit('ORDER_UPDATED',co);
+  }
+
+  _refund(o){
+    const actual=new Decimal(o.filled).mul(o.price).mul(new Decimal(1).add(FEE_RATE));
+    const excess=o.frozenAmount.sub(actual);
+    if(excess.gt(0)) this.ledger.unfreezeUsdc(o.userId,excess);
+  }
+
+  cancelOrder(id){
+    const o=this.orders.get(id);
+    if(!o) throw new EngineError('NOT_FOUND','Ордер не найден');
+    if(['FILLED','CANCELLED','EXPIRED'].includes(o.status))
+      throw new EngineError('CANNOT_CANCEL','Ордер уже завершён');
+    if(o.type==='stop'&&!o.isActivated){ this.stopWatcher.unregister(id); }
+    const rem=o.quantity-o.filled;
+    if(o.side==='BUY'&&o.frozenAmount){
+      const rf=new Decimal(rem).mul(o.price).mul(new Decimal(1).add(FEE_RATE));
+      this.ledger.unfreezeUsdc(o.userId,rf);
+    } else if(o.side==='SELL'){ this.ledger.unfreezeShares(o.userId,o.outcome,rem); }
+    this.orderBook.remove(id,o.side);
+    o.status='CANCELLED'; o.cancelReason='USER_CANCELLED';
+    this.orders.set(id,o); this._emit('ORDER_UPDATED',o); return o;
+  }
+
+  onPriceTick(newPrice, outcome){
+    const price=new Decimal(newPrice);
+    this._lastPrice=price;
+    this.stopWatcher.onTick(price,outcome);
+    this._tryMatchLimits(price,outcome);
+    this._checkExpiry();
+    this._emit('PRICE_TICK',{price,outcome});
+  }
+
+  _tryMatchLimits(price,outcome){
+    // BUY-лимит исполняется когда рыночная цена <= лимитной цены ордера
+    for(const o of this.orderBook.getBids()){
+      if(!['PENDING','PARTIALLY_FILLED'].includes(o.status)) continue;
+      if(o.outcome !== outcome) continue;
+      if(price.lte(o.price)){
+        const rem = o.quantity - o.filled;
+        const execP = price; // исполняем по текущей рыночной цене (лучше для покупателя)
+        const synthetic = {
+          id:'_syn_'+Date.now(), userId:'sim', side:'SELL',
+          outcome:o.outcome, price:execP, quantity:rem, filled:0,
+          status:'PENDING', isActivated:false, ttl:'GTC',
+          stopPrice:null, cancelReason:null, gapWarning:false,
+          createdAt:Date.now(), executions:[], frozenAmount:null
+        };
+        this._fill(o, synthetic, rem, execP, o.outcome);
+        if(o.side==='BUY' && o.frozenAmount) this._refund(o);
+        if(o.userId !== 'sim') this._emit('ORDER_UPDATED', o);
+      }
+    }
+    // SELL-лимит исполняется когда рыночная цена >= лимитной цены ордера
+    for(const o of this.orderBook.getAsks()){
+      if(!['PENDING','PARTIALLY_FILLED'].includes(o.status)) continue;
+      if(o.outcome !== outcome) continue;
+      if(price.gte(o.price)){
+        const rem = o.quantity - o.filled;
+        const execP = price;
+        const synthetic = {
+          id:'_syn_'+Date.now(), userId:'sim', side:'BUY',
+          outcome:o.outcome, price:execP, quantity:rem, filled:0,
+          status:'PENDING', isActivated:false, ttl:'GTC',
+          stopPrice:null, cancelReason:null, gapWarning:false,
+          createdAt:Date.now(), executions:[], frozenAmount:null
+        };
+        this._fill(o, synthetic, rem, execP, o.outcome);
+        if(o.userId !== 'sim') this._emit('ORDER_UPDATED', o);
+      }
+    }
+  }
+
+  _checkExpiry(){
+    const now=Date.now();
+    for(const o of this.orders.values()){
+      if(!['PENDING','PARTIALLY_FILLED'].includes(o.status))continue;
+      if(o.ttl&&o.ttl!=='GTC'&&now>new Date(o.ttl).getTime()){
+        const rem=o.quantity-o.filled;
+        if(o.side==='BUY'&&o.frozenAmount){
+          const rf=new Decimal(rem).mul(o.price).mul(new Decimal(1).add(FEE_RATE));
+          this.ledger.unfreezeUsdc(o.userId,rf);
+        } else if(o.side==='SELL'){ this.ledger.unfreezeShares(o.userId,o.outcome,rem); }
+        this.orderBook.remove(o.id,o.side);
+        o.status='EXPIRED'; o.cancelReason='TTL_EXPIRED';
+        this._emit('ORDER_UPDATED',o);
+      }
+    }
+  }
+
+  _emit(evt,data){ this.dispatchEvent(Object.assign(new Event(evt),{data})); }
+  getUserOrders(id){ return[...this.orders.values()].filter(o=>o.userId===id); }
+}
+
+// ════════════════════════════════════════════════════════
+// UI STATE
+// ════════════════════════════════════════════════════════
+const ledger = new BalanceLedger();
+const engine = new OrderEngine(ledger);
+
+let currentSide = 'YES';
+let currentType = 'market';
+let selfBuy     = false;
+let isSubmitting = false;
+let marketPrice  = 0.65;
+let prevPrice    = 0.65;
+let realizedPnl  = new Decimal(0);
+let positions    = {};  // {YES:{qty,avgPrice}, NO:{...}}
+let tradeLog     = [];
+let chartData    = [];
+
+// Pre-fill sim sellers for demo
+ledger.deposit('sim', 9999); ledger.depositShares('sim','YES',9999); ledger.depositShares('sim','NO',9999);
+
+// ── Engine event listeners ───────────────────────────────
+engine.addEventListener('ORDER_UPDATED', e => {
+  const o = e.data;
+  // БАГ 3 FIX: рендерим для любого ордера пользователя (не только market)
+  if (o.userId === USER_ID) {
+    console.log(`[UI] ORDER_UPDATED: ${o.id} | статус: ${o.status} | исполнено: ${o.filled}/${o.quantity}`);
+    render();
+  }
+});
+
+engine.addEventListener('ORDER_PLACED', e => {
+  const o = e.data;
+  if (o.userId === USER_ID) {
+    console.log(`[UI] ORDER_PLACED: ${o.id} | тип: ${o.type} | статус: ${o.status}`);
+    // БАГ 3 FIX: немедленный рендер после размещения — ордер виден в "Открытых" сразу
+    render();
+  }
+});
+
+engine.addEventListener('TRADE', e => {
+  const { orderId, qty, execPrice, outcome } = e.data;
+  const o = engine.orders.get(orderId);
+
+  // Обновляем позицию для пользователя — используем outcome из события (реальный)
+  if (o && o.userId === USER_ID && o.side === 'BUY') {
+    updatePositions(o.outcome, qty, execPrice.toNumber());
+  }
+
+  // Самовыкуп при исполнении LIMIT: если selfBuy включён и позиция закрывается
+  if (o && o.userId === USER_ID && selfBuy && o.side === 'BUY') {
+    const oppOutcome = o.outcome === 'YES' ? 'NO' : 'YES';
+    if (positions[oppOutcome] && positions[oppOutcome].qty > 0) {
+      const closeQty = Math.min(qty, positions[oppOutcome].qty);
+      const pnl = new Decimal(execPrice).sub(positions[oppOutcome].avgPrice).mul(closeQty);
+      realizedPnl = realizedPnl.add(pnl);
+      positions[oppOutcome].qty -= closeQty;
+      positions[oppOutcome].totalCost -= positions[oppOutcome].avgPrice * closeQty;
+      if (positions[oppOutcome].qty === 0) delete positions[oppOutcome];
+    }
+  }
+
+  const mine = o?.userId === USER_ID;
+  const t = { time: timeStr(), price: execPrice.toNumber(), qty, outcome: o?.outcome || outcome, mine };
+  tradeLog.unshift(t);
+  if (tradeLog.length > 80) tradeLog.pop();
+  render();
+});
+
+
+
+function updatePositions(outcome, qty, execPrice) {
+  if (!positions[outcome]) {
+    positions[outcome] = { qty: 0, avgPrice: 0, totalCost: 0 };
+  }
+  const p = positions[outcome];
+  const newCost = p.totalCost + qty * execPrice;
+  p.qty += qty;
+  p.totalCost = newCost;
+  p.avgPrice = p.qty > 0 ? newCost / p.qty : 0;
+}
+
+// ── Chart ────────────────────────────────────────────────
+(function initChart(){
+  let p = 0.55;
+  for (let i = 0; i < 80; i++) {
+    p = Math.max(0.05, Math.min(0.95, p + (Math.random()-0.48)*0.025));
+    chartData.push(p);
+  }
+  chartData.push(0.65);
+})();
+
+function drawChart() {
+  const c = document.getElementById('chart');
+  const W = c.offsetWidth, H = c.offsetHeight;
+  if (!W||!H) return;
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const d = chartData.slice(-90);
+  const mn = Math.min(...d)-0.03, mx = Math.max(...d)+0.03;
+  const sx = W/(d.length-1), sy = (H-24)/(mx-mn);
+  const ty = v => H-14-(v-mn)*sy;
+  // Grid
+  for(let g=0;g<=4;g++){
+    const y=12+g*(H-24)/4;
+    ctx.strokeStyle='rgba(255,255,255,.04)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,.2)'; ctx.font='9px JetBrains Mono';
+    ctx.fillText('$'+(mx-g*(mx-mn)/4).toFixed(3),3,y-2);
+  }
+  // Area
+  const g2 = ctx.createLinearGradient(0,0,0,H);
+  g2.addColorStop(0,'rgba(38,166,91,.2)'); g2.addColorStop(1,'rgba(38,166,91,0)');
+  ctx.beginPath(); ctx.moveTo(0,ty(d[0]));
+  d.forEach((v,i)=>ctx.lineTo(i*sx,ty(v)));
+  ctx.lineTo((d.length-1)*sx,H); ctx.lineTo(0,H);
+  ctx.fillStyle=g2; ctx.fill();
+  // Line
+  ctx.beginPath(); ctx.strokeStyle='#26a65b'; ctx.lineWidth=1.5;
+  d.forEach((v,i)=>i===0?ctx.moveTo(0,ty(v)):ctx.lineTo(i*sx,ty(v))); ctx.stroke();
+  // Last price
+  const last=d[d.length-1];
+  ctx.setLineDash([3,3]); ctx.strokeStyle='rgba(240,180,41,.35)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,ty(last)); ctx.lineTo(W,ty(last)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(240,180,41,.85)'; ctx.font='9px JetBrains Mono';
+  ctx.fillText('$'+last.toFixed(4), W-54, ty(last)-3);
+}
+
+// ── Simulated market ──────────────────────────────────────
+setInterval(() => {
+  prevPrice = marketPrice;
+  marketPrice = Math.max(0.05, Math.min(0.95, marketPrice + (Math.random()-0.495)*0.009));
+  const mp = new Decimal(marketPrice.toFixed(4));
+
+  // Чистим старые sim-ордера из стакана перед добавлением новых
+  // Иначе стакан раздувается до тысяч записей и тормозит рендер
+  for(const [key, orders] of [...engine.orderBook._asks]) {
+    const filtered = orders.filter(o => o.userId !== 'sim');
+    if(filtered.length === 0) engine.orderBook._asks.delete(key);
+    else engine.orderBook._asks.set(key, filtered);
+  }
+  for(const [key, orders] of [...engine.orderBook._bids]) {
+    const filtered = orders.filter(o => o.userId !== 'sim');
+    if(filtered.length === 0) engine.orderBook._bids.delete(key);
+    else engine.orderBook._bids.set(key, filtered);
+  }
+
+  // Добавляем ликвидность: asks чуть выше, bids чуть ниже рынка
+  // Также добавляем ликвидность прямо на рыночной цене чтобы limit-ордера исполнялись
+  try {
+    const spread = new Decimal('0.005');
+    engine.placeLimit('sim','SELL','YES', mp.add(spread), 500);
+    engine.placeLimit('sim','SELL','NO',  mp.add(spread), 500);
+    engine.placeLimit('sim','BUY', 'YES', mp.sub(spread), 500);
+    engine.placeLimit('sim','BUY', 'NO',  mp.sub(spread), 500);
+    // Ликвидность на рыночной цене — для немедленного исполнения limit-ордеров
+    engine.placeLimit('sim','SELL','YES', mp, 300);
+    engine.placeLimit('sim','SELL','NO',  mp, 300);
+    engine.placeLimit('sim','BUY', 'YES', mp, 300);
+    engine.placeLimit('sim','BUY', 'NO',  mp, 300);
+  } catch(e) {}
+
+  chartData.push(marketPrice);
+  if (chartData.length > 200) chartData.shift();
+
+  // Background sim trades
+  const s = Math.random()>0.5?'YES':'NO';
+  const tp = marketPrice*(0.997+Math.random()*0.006);
+  const tq = Math.floor(10+Math.random()*300);
+  tradeLog.unshift({time:timeStr(),price:tp,qty:tq,outcome:s,mine:false});
+  if(tradeLog.length>80) tradeLog.pop();
+
+  engine.onPriceTick(mp, 'YES');
+  engine.onPriceTick(mp, 'NO');
+
+  updateTopBar();
+  renderOB();
+  drawChart();
+  renderTrades();
+  renderBalance();
+  renderPositions();
+  recalc();
+}, 1800);
+
+// ── UI helpers ────────────────────────────────────────────
+function setSide(s) {
+  currentSide = s;
+  document.getElementById('sb-yes').classList.toggle('active', s==='YES');
+  document.getElementById('sb-no').classList.toggle('active', s==='NO');
+  const btn = document.getElementById('submit-btn');
+  btn.className = 'submit-btn ' + (s==='YES'?'yes-btn':'no-btn');
+  updateBtnLabel(); recalc();
+}
+
+function setType(t) {
+  currentType = t;
+  document.getElementById('tt-market').classList.toggle('active', t==='market');
+  document.getElementById('tt-limit').classList.toggle('active',  t==='limit');
+  document.getElementById('field-limit').style.display = t==='limit' ? 'block':'none';
+  document.getElementById('field-ttl').style.display   = t==='limit' ? 'block':'none';
+  updateBtnLabel(); recalc();
+}
+
+function updateBtnLabel() {
+  const lbl = {market:'MARKET ОРДЕР', limit:'LIMIT ОРДЕР'};
+  document.getElementById('submit-lbl').textContent = lbl[currentType] + ' · ' + currentSide;
+}
+
+function setMktPrice() {
+  document.getElementById('limit-price').value = marketPrice.toFixed(3); recalc();
+}
+
+function toggleSelfBuy() {
+  selfBuy = !selfBuy;
+  document.getElementById('sb-toggle').classList.toggle('on', selfBuy);
+  document.getElementById('self-buy-row').classList.toggle('on', selfBuy);
+  document.getElementById('cs-sb-row').style.display = selfBuy ? 'flex':'none';
+  recalc();
+}
+
+function setPct(pct) {
+  document.querySelectorAll('.pct-btn').forEach(b => b.classList.toggle('active', b.textContent===pct+'%'));
+  const price = getPrice();
+  const avail = ledger.getBalance(USER_ID).available;
+  const maxQty = Math.floor(avail.div(new Decimal(price).mul(new Decimal(1).add(FEE_RATE))).toNumber());
+  document.getElementById('qty').value = Math.max(MIN_LOT, Math.floor(maxQty*pct/100));
+  recalc();
+}
+
+function getPrice() {
+  if (currentType === 'market') return marketPrice;
+  const v = parseFloat(document.getElementById('limit-price').value);
+  return isNaN(v) ? marketPrice : v;
+}
+
+function getTtl() {
+  if (currentType === 'market') return 'GTC';
+  const v = document.getElementById('ttl-select').value;
+  if (v === 'GTC') return 'GTC';
+  const msMap = {'1h':3600000,'4h':14400000,'24h':86400000};
+  return new Date(Date.now() + (msMap[v]||3600000)).toISOString();
+}
+
+// ── Recalc & Validation ───────────────────────────────────
+function recalc() {
+  const q     = parseInt(document.getElementById('qty').value, 10);
+  const price = getPrice();
+  const errEl = document.getElementById('err-msg');
+  const csEl  = document.getElementById('cs');
+
+  const err = validate(q, price);
+  if (err) { errEl.textContent='⚠ '+err; errEl.className='err-msg show'; }
+
+  if (Number.isInteger(q) && q >= MIN_LOT && price > 0) {
+    const raw   = new Decimal(q).mul(price);
+    const fee   = raw.mul(FEE_RATE);
+    const total = raw.add(fee);
+    csEl.className = 'cs show';
+    document.getElementById('cs-qty').textContent   = q + ' шт';
+    document.getElementById('cs-price').textContent = '$'+price.toFixed(4) +
+      (currentType==='market' ? ' (рыночная)' : ' (лимит)');
+    document.getElementById('cs-fee').textContent   = '$'+fee.toFixed(4);
+    if (selfBuy && positions[currentSide]) {
+      const sbq = Math.min(q, positions[currentSide].qty);
+      document.getElementById('cs-sb').textContent = sbq+' шт (закрывается)';
+    }
+    document.getElementById('cs-total').textContent = '$'+total.toFixed(4);
+  } else { csEl.className = 'cs'; }
+
+  document.getElementById('submit-btn').disabled = !!err || !Number.isInteger(q) || q < MIN_LOT || isSubmitting;
+}
+
+function validate(q, price) {
+  if (!Number.isInteger(q) || q < MIN_LOT) return `Мин. лот: ${MIN_LOT} шт`;
+  if (price <= 0 || price >= 1) return 'Цена: 0.01–0.99';
+  const raw   = new Decimal(q).mul(price);
+  const total = raw.mul(new Decimal(1).add(FEE_RATE));
+  const avail = ledger.getBalance(USER_ID).available;
+  if (total.gt(avail)) return `Недостаточно средств · доступно $${avail.toFixed(2)}`;
+  return null;
+}
+
+// ── Submit ────────────────────────────────────────────────
+async function submitOrder() {
+  if (isSubmitting) return;
+  const q     = parseInt(document.getElementById('qty').value, 10);
+  const price = getPrice();
+  const err   = validate(q, price);
+  if (err) { toast(err,'error'); return; }
+
+  isSubmitting = true;
+  document.getElementById('spinner').style.display = 'block';
+  document.getElementById('submit-btn').disabled = true;
+
+  try {
+    await delay(280);
+    let order;
+    const ttl = getTtl();
+    if (currentType === 'market') {
+      order = engine.placeMarket(USER_ID, 'BUY', currentSide, q);
+    } else {
+      order = engine.placeLimit(USER_ID, 'BUY', currentSide, new Decimal(price.toFixed(4)), q, ttl);
+      if (order.status === 'FILLED') {
+        switchTab('filled');
+      } else {
+        switchTab('open');
+      }
+    }
+    const labels = {FILLED:'✓ Исполнен',PENDING:'📋 Размещён · ждёт цены',PARTIALLY_FILLED:'⚡ Частично исполнен',CANCELLED:'✗ Отменён'};
+    const type = order.status === 'FILLED' ? 'success' : 'info';
+    toast(`${labels[order.status]||''} | ${q} ${currentSide} @ $${price.toFixed(3)}`, type);
+    console.log(`[UI] submitOrder завершён: ${order.id} | статус: ${order.status}`);
+    document.getElementById('qty').value = '';
+    recalc();
+  } catch(e) {
+    const msgs = {INSUFFICIENT_BALANCE:'Недостаточно средств',INSUFFICIENT_ASSETS:'Недостаточно долей',
+      INVALID_PRICE:'Некорректная цена',INVALID_QUANTITY:'Некорректное количество',
+      BALANCE_RACE:'Баланс изменился. Попробуйте снова.'};
+    toast(msgs[e.code] || e.message || 'Ошибка размещения', 'error');
+  } finally {
+    isSubmitting = false;
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('submit-btn').disabled = false;
+    render();
+  }
+}
+
+function cancelOrder(id) {
+  try { engine.cancelOrder(id); toast('Ордер отменён · '+id,'info'); render(); }
+  catch(e) { toast(e.message,'error'); }
+}
+
+// ── Render helpers ────────────────────────────────────────
+function updateTopBar() {
+  const chg = ((marketPrice - prevPrice) / prevPrice * 100).toFixed(2);
+  const color = marketPrice >= prevPrice ? 'var(--yes)':'var(--no)';
+  document.getElementById('top-price').textContent = '$'+marketPrice.toFixed(4);
+  document.getElementById('top-price').style.color  = color;
+  document.getElementById('top-chg').textContent   = (marketPrice>=prevPrice?'+':'')+chg+'%';
+  document.getElementById('top-chg').style.color    = color;
+}
+
+function renderOB() {
+  const { asks, bids } = engine.orderBook.snapshot();
+  const maxT = Math.max(...asks.map(r=>r.total), ...bids.map(r=>r.total), 1);
+  const row = (r, cls, pCls) =>
+    `<div class="ob-row ${cls}" onclick="setLimitFromOB(${r.price})">
+      <div class="ob-fill" style="width:${(r.total/maxT*100).toFixed(1)}%"></div>
+      <span class="${pCls}">$${r.price.toFixed(3)}</span>
+      <span class="ob-v">${r.qty}</span>
+      <span class="ob-t">${r.total}</span>
+    </div>`;
+  document.getElementById('ob-asks').innerHTML = [...asks].reverse().map(r=>row(r,'ob-ask','ob-ap')).join('');
+  document.getElementById('ob-bids').innerHTML = bids.map(r=>row(r,'ob-bid','ob-bp')).join('');
+  if (asks.length && bids.length) {
+    const sp = (asks[0].price - bids[0].price);
+    document.getElementById('ob-spread-val').textContent =
+      '$'+sp.toFixed(3)+' · '+(sp/asks[0].price*100).toFixed(1)+'%';
+  }
+}
+
+function setLimitFromOB(p) {
+  if (currentType==='market') setType('limit');
+  document.getElementById('limit-price').value = p.toFixed(3); recalc();
+}
+
+function renderTrades() {
+  const el = document.getElementById('trades-list');
+  const rows = tradeLog.slice(0,40).map(t=>`
+    <div class="trade-row ${t.mine?'trade-mine':''}">
+      <span style="color:var(--muted)">${t.time}</span>
+      <span style="color:${t.outcome==='YES'?'var(--yes)':'var(--no)'}">$${t.price.toFixed(4)}</span>
+      <span style="color:var(--muted)">${t.qty}</span>
+      <span style="text-align:right;color:${t.mine?'var(--gold)':'var(--muted)'}">${t.mine?'МОЯ':t.outcome}</span>
+    </div>`).join('');
+  const hdr = el.querySelector('[style*="font-size:9px"]');
+  el.innerHTML = '';
+  if (hdr) el.appendChild(hdr); else el.insertAdjacentHTML('afterbegin',
+    '<div class="trade-row" style="color:var(--muted);font-size:9px;padding:4px 12px"><span>Время</span><span>Цена</span><span>Объём</span><span style="text-align:right">Тип</span></div>');
+  el.insertAdjacentHTML('beforeend', rows);
+}
+
+function renderBalance() {
+  const b = ledger.getBalance(USER_ID);
+  document.getElementById('bal-avail').textContent  = '$'+b.available.toFixed(2);
+  document.getElementById('bal-frozen').textContent = '$'+b.frozen.toFixed(2);
+  document.getElementById('bal-yes').textContent    = b.shares.YES||0;
+  document.getElementById('bal-no').textContent     = b.shares.NO||0;
+
+  // Unrealized P&L
+  let upnl = new Decimal(0);
+  for (const [outcome, p] of Object.entries(positions)) {
+    if (p.qty > 0) {
+      const curr = new Decimal(marketPrice).mul(p.qty);
+      const cost = new Decimal(p.avgPrice).mul(p.qty);
+      upnl = upnl.add(curr.sub(cost));
+    }
+  }
+  const upnlEl = document.getElementById('bal-upnl');
+  upnlEl.textContent = (upnl.gte(0)?'+':'')+'$'+upnl.toFixed(2);
+  upnlEl.style.color = upnl.gte(0)?'var(--yes)':'var(--no)';
+  document.getElementById('top-upnl').textContent = upnlEl.textContent;
+  document.getElementById('top-upnl').style.color  = upnlEl.style.color;
+
+  const rpnlEl = document.getElementById('bal-rpnl');
+  rpnlEl.textContent = (realizedPnl.gte(0)?'+':'')+'$'+realizedPnl.toFixed(2);
+  rpnlEl.style.color = realizedPnl.gte(0)?'var(--yes)':'var(--no)';
+  document.getElementById('top-rpnl').textContent = rpnlEl.textContent;
+  document.getElementById('top-rpnl').style.color  = rpnlEl.style.color;
+}
+
+function renderPositions() {
+  const el = document.getElementById('pos-list');
+  const keys = Object.keys(positions).filter(k=>positions[k].qty>0);
+  if (!keys.length) { el.innerHTML='<div class="empty-state">Нет открытых позиций</div>'; return; }
+  let totalUpnl = new Decimal(0);
+  el.innerHTML = keys.map(outcome => {
+    const p = positions[outcome];
+    const cur = new Decimal(marketPrice).mul(p.qty);
+    const cost = new Decimal(p.avgPrice).mul(p.qty);
+    const pnl = cur.sub(cost);
+    const pct = cost.gt(0) ? pnl.div(cost).mul(100).toFixed(2) : '0.00';
+    totalUpnl = totalUpnl.add(pnl);
+    const color = outcome==='YES'?'var(--yes)':'var(--no)';
+    return `<div class="pos-row">
+      <div class="pos-hdr">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:${color};font-weight:700">${outcome}</span>
+          <span style="color:var(--muted);font-size:9px">${p.qty} шт</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <span style="color:${pnl.gte(0)?'var(--yes)':'var(--no)'};font-weight:700">
+            ${pnl.gte(0)?'+':''}$${pnl.toFixed(4)} (${pct}%)</span>
+          <button class="close-btn" onclick="closePos('${outcome}')">Закрыть</button>
+        </div>
+      </div>
+      <div class="pos-details">
+        <div><div class="pos-dl">СР. ЦЕНА</div><div class="pos-dv">$${p.avgPrice.toFixed(4)}</div></div>
+        <div><div class="pos-dl">ТЕК. ЦЕНА</div><div class="pos-dv">$${marketPrice.toFixed(4)}</div></div>
+        <div><div class="pos-dl">СТОИМОСТЬ</div><div class="pos-dv">$${cur.toFixed(2)}</div></div>
+        <div><div class="pos-dl">СЕБЕСТ.</div><div class="pos-dv">$${cost.toFixed(2)}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+  const pp = document.getElementById('pos-upnl');
+  pp.textContent = (totalUpnl.gte(0)?'+':'')+'$'+totalUpnl.toFixed(2);
+  pp.style.color = totalUpnl.gte(0)?'var(--yes)':'var(--no)';
+}
+
+function closePos(outcome) {
+  const p = positions[outcome]; if (!p || p.qty === 0) return;
+  try {
+    ledger.depositShares(USER_ID, outcome, p.qty); // возвращаем доли чтобы движок мог продать
+    const o = engine.placeMarket(USER_ID,'SELL',outcome,p.qty);
+    // avgExecPrice из записанных исполнений
+    const execs = o.executions || [];
+    const avgExec = execs.length
+      ? execs.reduce((s,e)=>s+e.execPrice.toNumber()*e.qty,0)/execs.reduce((s,e)=>s+e.qty,0)
+      : marketPrice;
+    const pnl = new Decimal(avgExec).sub(p.avgPrice).mul(p.qty);
+    o.pnl = pnl.toNumber();  // записываем P&L в объект ордера для истории
+    realizedPnl = realizedPnl.add(pnl);
+    delete positions[outcome];
+    toast(`Позиция ${outcome} закрыта · P&L ${pnl.gte(0)?'+':''}$${pnl.toFixed(4)}`,'success');
+    render();
+  } catch(e){ toast(e.message,'error'); }
+}
+
+function renderOrders() {
+  const all  = engine.getUserOrders(USER_ID);
+  const open = all.filter(o=>['PENDING','PARTIALLY_FILLED'].includes(o.status));
+  const done = all.filter(o=>o.status==='FILLED');
+  const cxld = all.filter(o=>['CANCELLED','EXPIRED'].includes(o.status));
+
+  document.getElementById('open-cnt').textContent = open.length;
+  document.getElementById('open-badge').textContent = open.length?`(${open.length})`:'';
+
+  const fmt = ts => new Date(ts).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+  document.getElementById('tb-open').innerHTML = open.map(o=>`<tr>
+    <td style="color:var(--muted);font-size:9px">${o.id}</td>
+    <td>${fmt(o.createdAt)}</td>
+    <td style="color:var(--gold);text-transform:uppercase">${o.type}${o.isActivated?' ⚡':''}</td>
+    <td style="color:${o.side==='BUY'?'var(--yes)':'var(--no)'}">${o.side} ${o.outcome}</td>
+    <td>$${o.price.toFixed(3)}</td>
+    <td>${o.stopPrice?'$'+o.stopPrice.toFixed(3):'—'}</td>
+    <td>${o.quantity}</td>
+    <td>${o.filled}</td>
+    <td style="color:var(--muted);font-size:10px">${o.ttl==='GTC'?'GTC':new Date(o.ttl).toLocaleTimeString('ru')}</td>
+    <td><span class="${o.status==='PENDING'?'s-open':'s-partial'}">${o.status}</span></td>
+    <td><button class="cxl-btn" onclick="cancelOrder('${o.id}')">Отменить</button></td>
+  </tr>`).join('') || '';
+
+  // Сортируем по времени исполнения — свежие сверху
+  const doneSorted = [...done].sort((a,b)=>(b.filledAt||b.createdAt)-(a.filledAt||a.createdAt));
+
+  document.getElementById('tb-filled').innerHTML = doneSorted.map(o=>{
+    const execs = o.executions || [];
+    // Средневзвешенная цена исполнения
+    const avgExec = execs.length
+      ? execs.reduce((s,e)=>s+e.execPrice.toNumber()*e.qty,0) / execs.reduce((s,e)=>s+e.qty,0)
+      : o.price.toNumber();
+    const totalFee   = o.totalFee   ? '$'+o.totalFee.toFixed(4)   : '—';
+    const totalSpent = o.totalSpent ? '$'+o.totalSpent.toFixed(4)  : '—';
+    const filledTime = o.filledAt ? fmt(o.filledAt) : fmt(o.createdAt);
+
+    // P&L считаем только для SELL (закрытие позиции)
+    let pnlCell = '—';
+    if (o.side==='SELL' && o.pnl != null) {
+      const pnl = o.pnl;
+      pnlCell = `<span style="color:${pnl>=0?'var(--yes)':'var(--no)'}">${pnl>=0?'+':''}$${pnl.toFixed(4)}</span>`;
+    }
+
+    // Детали исполнений (частичные)
+    const execDetail = execs.length > 1
+      ? `<span title="${execs.map(e=>`${e.qty}шт@$${e.execPrice.toFixed(4)}`).join(' | ')}" style="color:var(--gold);cursor:help">${execs.length} частей ⓘ</span>`
+      : '';
+
+    return `<tr>
+      <td style="color:var(--muted);font-size:9px">${o.id}</td>
+      <td>${filledTime}</td>
+      <td style="color:var(--gold);text-transform:uppercase">${o.type}</td>
+      <td style="color:${o.side==='BUY'?'var(--yes)':'var(--no)'}">${o.side} ${o.outcome}</td>
+      <td style="color:#fff;font-weight:600">$${avgExec.toFixed(4)} ${execDetail}</td>
+      <td>${o.filled} / ${o.quantity}</td>
+      <td style="color:var(--muted)">${totalFee}</td>
+      <td style="color:var(--yes)">${totalSpent}</td>
+      <td>${pnlCell}</td>
+    </tr>`;
+  }).join('') || '';
+
+  document.getElementById('tb-canceled').innerHTML = cxld.map(o=>`<tr>
+    <td style="color:var(--muted);font-size:9px">${o.id}</td>
+    <td>${fmt(o.createdAt)}</td>
+    <td style="text-transform:uppercase">${o.type}</td>
+    <td style="color:${o.side==='BUY'?'var(--yes)':'var(--no)'}">${o.side} ${o.outcome}</td>
+    <td>$${o.price?o.price.toFixed(3):'—'}</td>
+    <td>${o.quantity}</td>
+    <td style="color:var(--muted);font-size:10px">${o.cancelReason||'—'} ${o.status==='EXPIRED'?'⏱':''}</td>
+  </tr>`).join('') || '';
+
+  document.getElementById('e-open').style.display    = open.length?'none':'block';
+  document.getElementById('e-filled').style.display  = done.length?'none':'block';
+  document.getElementById('e-canceled').style.display= cxld.length?'none':'block';
+}
+
+let _renderPending = false;
+function render() {
+  if (_renderPending) return;
+  _renderPending = true;
+  requestAnimationFrame(() => {
+    _renderPending = false;
+    renderBalance(); renderPositions(); renderOrders(); renderTrades();
+  });
+}
+
+function switchTab(name) {
+  const names=['open','filled','canceled'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
+  document.querySelectorAll('.tc').forEach((c,i)=>c.classList.toggle('active',names[i]===name));
+}
+
+function toast(msg, type='info') {
+  const c = document.getElementById('tc');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`; el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},4500);
+}
+
+function timeStr() {
+  return new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+function delay(ms) { return new Promise(r=>setTimeout(r,ms)); }
+
+// Init
+renderOB(); drawChart(); render();
+setType('market'); setSide('YES');
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>
