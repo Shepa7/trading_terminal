@@ -6,7 +6,7 @@
 
 ##  Демо
 
-**Живая версия:** https://shepa7.github.io/trading_terminal/
+**Живая версия:** https://shepa7.github.io/prediction_market_terminal/
 
 ---
 
@@ -171,7 +171,7 @@ python3 -m http.server 8000
 
 
 GitHub Pages
-Терминал развернут на: https://shepa7.github.io/trading_terminal/
+Терминал развернут на: https://shepa7.github.io/prediction_market_terminal/
 
 Ограничения
 	•	Демо-режим — Нет подключения к реальному блокчейну
